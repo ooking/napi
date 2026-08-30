@@ -1,0 +1,79 @@
+name: Deploy API (test)
+
+on:
+  push:
+    branches:
+      - release
+    paths-ignore:
+      - "web/default/**"
+      - "web/classic/**"
+      - "**/*.md"
+      - ".github/workflows/deploy-web-default-release.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-api-release
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    name: Build and deploy API
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Prepare embedded frontend placeholders
+        run: |
+          set -euo pipefail
+          mkdir -p web/default/dist web/classic/dist
+          printf '<!doctype html><html><head><title>api</title></head><body>api</body></html>\n' > web/default/dist/index.html
+          printf '<!doctype html><html><head><title>api</title></head><body>api</body></html>\n' > web/classic/dist/index.html
+
+      - name: Build API binary
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+          GOARCH: amd64
+          GOEXPERIMENT: greenteagc
+        run: |
+          set -euo pipefail
+          go build -ldflags "-s -w -X 'github.com/QuantumNous/new-api/common.Version=$(cat VERSION)'" -o napi
+
+      - name: Configure SSH
+        env:
+          SERVER_IP: ${{ secrets.SERVER_IP }}
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SERVER_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$SERVER_IP" >> ~/.ssh/known_hosts
+
+      - name: Deploy binary and restart service
+        env:
+          SERVER_IP: ${{ secrets.SERVER_IP }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_ENV: ${{ vars.SERVER_ENV }}
+          REMOTE_BIN_TARGET: ${{ vars.REMOTE_BIN_TARGET }}
+          REMOTE_SERVICE_NAME: ${{ vars.REMOTE_SERVICE_NAME }}
+        run: |
+          set -euo pipefail
+          SERVICE_NAME="${REMOTE_SERVICE_NAME:-new-api}"
+          ENV_FILE="$(mktemp)"
+          printf '%s\n' "$SERVER_ENV" > "$ENV_FILE"
+          ssh -i ~/.ssh/deploy_key "$SERVER_USER@$SERVER_IP" "mkdir -p '$REMOTE_BIN_TARGET'"
+          rsync -az -e "ssh -i ~/.ssh/deploy_key" napi "$SERVER_USER@$SERVER_IP:$REMOTE_BIN_TARGET/napi"
+          rsync -az -e "ssh -i ~/.ssh/deploy_key" "$ENV_FILE" "$SERVER_USER@$SERVER_IP:$REMOTE_BIN_TARGET/.env"
+          ssh -i ~/.ssh/deploy_key "$SERVER_USER@$SERVER_IP" "test -s '$REMOTE_BIN_TARGET/.env' && chmod 600 '$REMOTE_BIN_TARGET/.env' && chmod +x '$REMOTE_BIN_TARGET/napi' && sudo -n systemctl restart '$SERVICE_NAME' && sudo -n systemctl status '$SERVICE_NAME' --no-pager"

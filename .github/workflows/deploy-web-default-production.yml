@@ -1,0 +1,60 @@
+name: Deploy default web (production)
+
+on:
+  push:
+    branches:
+      - release
+    paths:
+      - "web/default/**"
+      - ".github/workflows/deploy-web-default-production.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-web-default-production
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    name: Build and deploy default web
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76 # v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        working-directory: web/default
+        run: bun install --frozen-lockfile
+
+      - name: Build
+        working-directory: web/default
+        run: bun run build
+
+      - name: Configure SSH
+        env:
+          SERVER_IP: ${{ secrets.SERVER_IP }}
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SERVER_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$SERVER_IP" >> ~/.ssh/known_hosts
+
+      - name: Deploy dist
+        env:
+          SERVER_IP: ${{ secrets.SERVER_IP }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          REMOTE_WWW_TARGET: ${{ vars.REMOTE_WWW_TARGET }}
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/deploy_key "$SERVER_USER@$SERVER_IP" "mkdir -p '$REMOTE_WWW_TARGET'"
+          rsync -az --delete -e "ssh -i ~/.ssh/deploy_key" web/default/dist/ "$SERVER_USER@$SERVER_IP:$REMOTE_WWW_TARGET/"

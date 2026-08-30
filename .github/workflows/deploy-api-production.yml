@@ -1,25 +1,24 @@
-name: Deploy API (test)
+name: Deploy API (production)
 
 on:
   push:
     branches:
       - release
     paths-ignore:
-      - "web/default/**"
-      - "web/classic/**"
+      - "web/**"
       - "**/*.md"
-      - ".github/workflows/deploy-web-default-release.yml"
+      - ".github/workflows/deploy-web-default-production.yml"
   workflow_dispatch:
 
 concurrency:
-  group: deploy-api-release
+  group: deploy-api-production
   cancel-in-progress: true
 
 jobs:
   build-and-deploy:
     name: Build and deploy API
     runs-on: ubuntu-latest
-    environment: release
+    environment: production
     permissions:
       contents: read
 
@@ -33,12 +32,11 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Prepare embedded frontend placeholders
+      - name: Prepare embedded frontend placeholder
         run: |
           set -euo pipefail
-          mkdir -p web/default/dist web/classic/dist
-          printf '<!doctype html><html><head><title>api</title></head><body>api</body></html>\n' > web/default/dist/index.html
-          printf '<!doctype html><html><head><title>api</title></head><body>api</body></html>\n' > web/classic/dist/index.html
+          mkdir -p web/dist
+          printf '<!doctype html><html><head><title>api</title></head><body>api</body></html>\n' > web/dist/index.html
 
       - name: Build API binary
         env:

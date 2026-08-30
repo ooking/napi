@@ -1,21 +1,21 @@
-name: Deploy default web (production)
+name: Deploy web (production)
 
 on:
   push:
     branches:
       - release
     paths:
-      - "web/default/**"
+      - "web/**"
       - ".github/workflows/deploy-web-default-production.yml"
   workflow_dispatch:
 
 concurrency:
-  group: deploy-web-default-production
+  group: deploy-web-production
   cancel-in-progress: true
 
 jobs:
   build-and-deploy:
-    name: Build and deploy default web
+    name: Build and deploy web
     runs-on: ubuntu-latest
     environment: production
     permissions:
@@ -31,11 +31,11 @@ jobs:
           bun-version: latest
 
       - name: Install dependencies
-        working-directory: web/default
+        working-directory: web
         run: bun install --frozen-lockfile
 
       - name: Build
-        working-directory: web/default
+        working-directory: web
         run: bun run build
 
       - name: Configure SSH
@@ -57,4 +57,4 @@ jobs:
         run: |
           set -euo pipefail
           ssh -i ~/.ssh/deploy_key "$SERVER_USER@$SERVER_IP" "mkdir -p '$REMOTE_WWW_TARGET'"
-          rsync -az --delete -e "ssh -i ~/.ssh/deploy_key" web/default/dist/ "$SERVER_USER@$SERVER_IP:$REMOTE_WWW_TARGET/"
+          rsync -az --delete -e "ssh -i ~/.ssh/deploy_key" web/dist/ "$SERVER_USER@$SERVER_IP:$REMOTE_WWW_TARGET/"
